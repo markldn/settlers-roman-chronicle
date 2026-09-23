@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settlers — A Roman Chronicle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Alegreya:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<div id="loading" class="screen">
+  <div class="load-box">
+    <div class="title-small">Settlers</div>
+    <div id="load-text">Preparing the land…</div>
+    <div class="bar"><div id="load-bar"></div></div>
+  </div>
+</div>
+
+<div id="title" class="screen hidden">
+  <div class="title-wrap">
+    <h1 class="game-title">SETTLERS</h1>
+    <div class="game-sub">A Roman Chronicle</div>
+    <div class="scroll menu">
+      <button data-act="campaign">Campaign</button>
+      <button data-act="free">Unlimited Play</button>
+      <button data-act="load">Load Game</button>
+      <button data-act="settings">Options</button>
+      <button data-act="help">How to Play</button>
+    </div>
+    <div class="credits">Everything you see and hear is generated in your browser — terrain, buildings, music.</div>
+  </div>
+</div>
+
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div id="clock">00:00</div>
+    <div id="speed" title="Game speed (+/-)">1×</div>
+    <div id="nowplaying"></div>
+  </div>
+  <div id="objectives" class="panel hidden"></div>
+  <div id="minimap-wrap" class="panel"><canvas id="minimap" width="220" height="190"></canvas></div>
+  <div id="toolbar">
+    <button data-tool="buildhelp" title="Build help (Space)"><img data-icon="bh_large"></button>
+    <button data-tool="minimap" title="Map (M)"><img data-icon="eye"></button>
+    <button data-tool="stock" title="Inventory (I)"><img data-icon="boards"></button>
+    <button data-tool="stats" title="Statistics (T)"><img data-icon="star"></button>
+    <button data-tool="economy" title="Economy &amp; military settings (E)"><img data-icon="hammer"></button>
+    <button data-tool="buildings" title="Buildings overview (B)"><img data-icon="bh_medium"></button>
+    <button data-tool="messages" title="Messages (N)"><img data-icon="coins"><span id="msgcount"></span></button>
+    <button data-tool="menu" title="Game menu (Esc)"><img data-icon="shield"></button>
+  </div>
+  <div id="toasts"></div>
+  <div id="roadhint" class="hidden">Road building: click nodes to lay the road, click a flag (or the end point again) to finish · Esc cancels</div>
+</div>
+
+<div id="windows"></div>
+<div id="tooltip" class="hidden"></div>
+<div id="modal" class="screen hidden"></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
