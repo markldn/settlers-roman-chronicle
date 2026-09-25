@@ -29,6 +29,7 @@
     <div class="scroll menu">
       <button data-act="campaign">Campaign</button>
       <button data-act="free">Unlimited Play</button>
+      <button data-act="multi">Multiplayer lobby</button>
       <button data-act="load">Load Game</button>
       <button data-act="settings">Options</button>
       <button data-act="help">How to Play</button>
@@ -56,7 +57,26 @@
     <button data-tool="menu" title="Game menu (Esc)"><img data-icon="shield"></button>
   </div>
   <div id="toasts"></div>
+  <div id="roster" class="panel hidden"></div>
+  <div id="chat" class="hidden"><div id="chat-log"></div><form id="chat-form" class="hidden"><input id="chat-input" type="text" maxlength="300" autocomplete="off" placeholder="Message to everyone · Enter sends · Esc closes"></form></div>
   <div id="roadhint" class="hidden">Road building: click nodes to lay the road, click a flag (or the end point again) to finish · Esc cancels</div>
+</div>
+
+<div id="lobby" class="screen hidden">
+  <div class="lb-hero"><h1 class="game-title">SETTLERS</h1><div class="game-sub">A Roman Chronicle · Multiplayer</div></div>
+  <div class="modal-box lobby-box">
+    <div class="mh"><span id="lb-heading">Multiplayer</span><span id="lb-status" class="lb-status"></span></div>
+    <div class="lb-body">
+      <div class="lb-main" id="lb-main"></div>
+      <div class="lb-side" id="lb-side">
+        <div class="lb-side-h" id="lb-chat-title">Lobby chat</div>
+        <div class="lb-log" id="lb-log"></div>
+        <form class="lb-form" id="lb-form"><input type="text" id="lb-input" maxlength="300" autocomplete="off" placeholder="Say something…"><button class="btn small">Send</button></form>
+        <div class="lb-people" id="lb-people"></div>
+      </div>
+    </div>
+    <div class="mf" id="lb-foot"></div>
+  </div>
 </div>
 
 <div id="windows"></div>

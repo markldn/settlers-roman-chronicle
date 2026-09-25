@@ -1,0 +1,14 @@
+{
+  "name": "settlers-roman-chronicle",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev-server": "node tools/dev-server.mjs",
+    "deploy": "node tools/deploy.mjs",
+    "test": "node tests/sim.test.mjs && node tests/mp.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

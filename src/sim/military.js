@@ -319,11 +319,14 @@ export function updateMilitary(game, dt) {
       b.catT = 0; b.inputs.stones--;
       game.emit('catapult', b.node, { p: b.owner, to: best.node });
       const tid = best.id;
-      game.projectiles.push({ from: b.node, to: best.node, t: 0, dur: 1.6, kind: 'stone', onHit: () => {
-        game.emit('impact', best.node, {});
-        const t = game.buildings.get(tid); if (!t || t.soldiers.length <= 1) return;
-        if (game.rng.chance(0.5)) { const sid = t.soldiers.pop(); game.settlers.delete(sid); game.emit('death', t.node, { p: t.owner }); game.players[t.owner].lost++; }
-      } });
+      game.projectiles.push({ from: b.node, to: best.node, t: 0, dur: 1.6, kind: 'stone', target: tid });
     }
   }
+}
+
+// a catapult stone lands (projectiles are plain data so that they survive save/load and snapshots)
+export function projectileHit(game, pr) {
+  game.emit('impact', pr.to, {});
+  const t = game.buildings.get(pr.target); if (!t || t.soldiers.length <= 1) return;
+  if (game.rng.chance(0.5)) { const sid = t.soldiers.pop(); game.settlers.delete(sid); game.emit('death', t.node, { p: t.owner }); game.players[t.owner].lost++; }
 }

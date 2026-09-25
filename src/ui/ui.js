@@ -194,7 +194,7 @@ export class UI {
       case 'KeyH': { const hq = [...this.game.buildings.values()].find(b => b.owner === this.me && b.type === 'hq'); if (hq) this.R.centerOn(hq.node); break; }
       case 'Equal': case 'NumpadAdd': this.app.cycleSpeed(1); break;
       case 'Minus': case 'NumpadSubtract': this.app.cycleSpeed(-1); break;
-      case 'Enter': if (this.road) this.finishRoad(); break;
+      case 'Enter': if (this.road) this.finishRoad(); else if (this.app.mp) { e.preventDefault(); this.app.lobby.openChat(); } break;
       case 'F5': e.preventDefault(); this.app.quickSave(); break;
       case 'F9': e.preventDefault(); this.app.quickLoad(); break;
     }
@@ -275,9 +275,11 @@ export class UI {
   }
   finishRoad() {
     const r = this.road; if (!r || r.nodes.length < 2) { this.cancelRoad(); return; }
-    const res = this.game.buildRoad(this.me, r.nodes);
-    if (!res.ok) { this.toast('Cannot build road: ' + res.reason, 'warn', -1, 3000); this.app.audio.ui('error'); return; }
+    const nodes = r.nodes.slice();
+    const v = L.validateRoad(this.game, this.me, nodes);
+    if (v !== true) { this.toast('Cannot build road: ' + v, 'warn', -1, 3000); this.app.audio.ui('error'); return; }
     this.cancelRoad();
+    this.app.cmd({ k: 'road', nodes }, (res) => { if (!res || !res.ok) { this.toast('Cannot build road: ' + (res ? res.reason : 'refused'), 'warn', -1, 3000); this.app.audio.ui('error'); } });
   }
   cancelRoad() { this.road = null; $('#roadhint').classList.add('hidden'); this.R.world.setPreview(null); }
 
@@ -306,15 +308,20 @@ export class UI {
     w.onAct = (a, el) => {
       if (a === 'tab') { tab = el.dataset.tab; this.lastTab = tab; w.last = null; this.renderWin('action'); return; }
       if (a === 'build') {
-        const b = g.placeBuilding(this.me, n, el.dataset.build);
-        if (!b) { this.app.audio.ui('error'); return; }
+        if (!g.canBuildType(this.me, n, el.dataset.build)) { this.app.audio.ui('error'); return; }
         this.closeWin('action');
-        // S2: after placing a building you immediately lay its road
-        const f = g.flags.get(b.flag);
-        if (f && !f.roads.some(Boolean)) this.startRoad(f.node);
+        this.app.cmd({ k: 'build', n, t: el.dataset.build }, (b) => {
+          if (!b) { this.app.audio.ui('error'); return; }
+          // S2: after placing a building you immediately lay its road
+          const f = this.game.flags.get(b.flag);
+          if (f && !f.roads.some(Boolean) && !this.road) this.startRoad(f.node);
+        });
         return;
       }
-      if (a === 'flag') { const f = g.placeFlag(this.me, n); this.closeWin('action'); if (f && !f.roads.some(Boolean)) this.startRoad(f.node); }
+      if (a === 'flag') {
+        this.closeWin('action');
+        this.app.cmd({ k: 'flag', n }, (f) => { if (f && !f.roads.some(Boolean) && !this.road) this.startRoad(f.node); });
+      }
     };
   }
 
@@ -337,9 +344,9 @@ export class UI {
     const w = this.openWin('flag', 'Flag', render, { x: pos.x + 30, y: pos.y - 60, width: 330 });
     w.onAct = (a) => {
       if (a === 'road') this.startRoad(f.node);
-      else if (a === 'geo') { if (!g.sendGeologist(this.me, f.id)) this.toast('No geologist available (needs a helper and a hammer)', 'warn'); else this.app.audio.ui('click'); }
-      else if (a === 'scout') { if (!g.sendScout(this.me, f.id)) this.toast('No scout available', 'warn'); }
-      else if (a === 'del') { g.destroyFlag(f.id); this.closeWin('flag'); }
+      else if (a === 'geo') this.app.cmd({ k: 'geo', id: f.id }, (ok) => { if (!ok) this.toast('No geologist available (needs a helper and a hammer)', 'warn'); else this.app.audio.ui('click'); });
+      else if (a === 'scout') this.app.cmd({ k: 'scout', id: f.id }, (ok) => { if (!ok) this.toast('No scout available', 'warn'); });
+      else if (a === 'del') { this.app.cmd({ k: 'delFlag', id: f.id }); this.closeWin('flag'); }
       else if (a === 'openb') { const b = g.buildings.get(f.building); if (b) this.openBuilding(b); }
     };
   }
@@ -358,7 +365,7 @@ export class UI {
     };
     const pos = this.R.toScreen(n);
     const w = this.openWin('road', 'Road', render, { x: pos.x + 30, y: pos.y - 60, width: 300 });
-    w.onAct = (a) => { if (a === 'flag') { g.placeFlag(this.me, n); this.closeWin('road'); } else if (a === 'del') { g.removeRoad(r.id); this.closeWin('road'); } };
+    w.onAct = (a) => { if (a === 'flag') { this.app.cmd({ k: 'flag', n }); this.closeWin('road'); } else if (a === 'del') { this.app.cmd({ k: 'delRoad', id: r.id }); this.closeWin('road'); } };
   }
 
   // ------------------------------------------------------------------ building window
@@ -396,14 +403,17 @@ export class UI {
     const pos = this.R.toScreen(b.node);
     const w = this.openWin(id, def.name, render, { x: Math.min(innerWidth - 420, pos.x + 40), y: Math.max(10, pos.y - 150), width: 400 });
     w.onAct = (a, el) => {
-      if (a === 'destroy') { if (confirm(`Destroy the ${def.name}?`)) { g.destroyBuilding(b.id); this.closeWin(id); } }
-      else if (a === 'stop') { g.setStopped(b.id, !b.stopped); }
+      if (a === 'destroy') { if (confirm(`Destroy the ${def.name}?`)) { this.app.cmd({ k: 'delBld', id: b.id }); this.closeWin(id); } }
+      else if (a === 'stop') { this.app.cmd({ k: 'stop', id: b.id, v: !b.stopped }, () => { if (this.wins.has(id)) { w.last = null; this.renderWin(id); } }); }
       else if (a === 'tab') { tab = el.dataset.tab; }
       else if (a === 'attackN') { attackN = +el.value; }
       else if (a === 'attack') {
-        const n = g.attack(this.me, b.id, attackN);
-        if (n) { this.toast(`${n} soldier${n > 1 ? 's' : ''} sent to attack`, 'war', b.node, 3000); this.app.audio.play('horn', 0.5); this.closeWin(id); }
-        else this.toast('No soldiers available in range', 'warn');
+        this.closeWin(id);
+        this.app.cmd({ k: 'attack', id: b.id, n: attackN }, (n) => {
+          if (n) { this.toast(`${n} soldier${n > 1 ? 's' : ''} sent to attack`, 'war', b.node, 3000); this.app.audio.play('horn', 0.5); }
+          else this.toast('No soldiers available in range', 'warn');
+        });
+        return;
       }
       w.last = null; this.renderWin(id);
     };
@@ -519,18 +529,20 @@ export class UI {
       }
       return h;
     }, { width: 420, x: 100, y: 70, live: false });
+    const redraw = () => { if (this.wins.has('economy')) { w.last = null; this.renderWin('economy'); } };
+    const mil = (key, v) => this.app.cmd({ k: 'military', key, v }, redraw);
     w.onAct = (a, el) => {
       const i = +el.dataset.i;
       if (a === 'tab') tab = el.dataset.tab;
-      else if (a === 'up' && i > 0) { const t = pl.transport; [t[i - 1], t[i]] = [t[i], t[i - 1]]; }
-      else if (a === 'down' && i < pl.transport.length - 1) { const t = pl.transport; [t[i + 1], t[i]] = [t[i], t[i + 1]]; }
-      else if (a === 'tool') pl.toolPrio[el.dataset.t] = +el.value;
-      else if (a === 'occ') pl.occupancy = +el.value / 10;
-      else if (a === 'reserve') pl.attackReserve = +el.value;
-      else if (a === 'hqres') pl.hqReserve = +el.value;
-      else if (a === 'strong') pl.sendStrong = el.checked;
-      else if (a === 'promote') pl.promote = el.checked;
-      w.last = null; this.renderWin('economy');
+      else if (a === 'up') this.app.cmd({ k: 'transport', i, d: -1 }, redraw);
+      else if (a === 'down') this.app.cmd({ k: 'transport', i, d: 1 }, redraw);
+      else if (a === 'tool') this.app.cmd({ k: 'tool', t: el.dataset.t, v: +el.value }, redraw);
+      else if (a === 'occ') mil('occupancy', +el.value);
+      else if (a === 'reserve') mil('attackReserve', +el.value);
+      else if (a === 'hqres') mil('hqReserve', +el.value);
+      else if (a === 'strong') mil('sendStrong', el.checked);
+      else if (a === 'promote') mil('promote', el.checked);
+      redraw();
     };
   }
 

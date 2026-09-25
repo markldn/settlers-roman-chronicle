@@ -4,7 +4,7 @@ import { generateMap, RES, SEA } from './mapgen.js';
 import { TERRAIN_INFO, TERRAIN as T, BUILDINGS, JOBS, WARES, TOOLS, DEFAULT_START, DEFAULT_TRANSPORT, PLAYER_COLORS, SIZE_RANK, FOODS } from './data.js';
 import * as L from './logistics.js';
 import { updateSettler, updateAnimal } from './jobs.js';
-import { recomputeTerritory, updateMilitary, attack as milAttack } from './military.js';
+import { recomputeTerritory, updateMilitary, attack as milAttack, projectileHit } from './military.js';
 import { aiTick } from './ai.js';
 
 export const TICK = 0.05;
@@ -418,7 +418,7 @@ export class Game {
     if (tk % 20 === 12) this.updateVision();
     for (const a of this.animals) updateAnimal(this, a, dt);
     if (tk % 4 === 1) for (let p = 0; p < this.players.length; p++) if (this.players[p].ai) aiTick(this, p);
-    for (let i = this.projectiles.length - 1; i >= 0; i--) { const pr = this.projectiles[i]; pr.t += dt / pr.dur; if (pr.t >= 1) { this.projectiles.splice(i, 1); pr.onHit && pr.onHit(); } }
+    for (let i = this.projectiles.length - 1; i >= 0; i--) { const pr = this.projectiles[i]; pr.t += dt / pr.dur; if (pr.t >= 1) { this.projectiles.splice(i, 1); projectileHit(this, pr); } }
   }
 
   // once per second: growth, warehouses, recruitment, stats, fire
@@ -494,7 +494,7 @@ export class Game {
       time: this.time, tickN: this.tickN, nextId: this.nextId, rng: this.rng.s,
       owner: Array.from(this.owner), roadAt: Array.from(this.roadAt),
       buildings: [...this.buildings.values()], flags: [...this.flags.values()], roads: [...this.roads.values()],
-      settlers: [...this.settlers.values()], wares: [...this.wares.values()], animals: this.animals, players, winner: this.winner,
+      settlers: [...this.settlers.values()], wares: [...this.wares.values()], animals: this.animals, projectiles: this.projectiles, players, winner: this.winner,
       mission: this.missionState || null,
     });
   }
@@ -513,10 +513,10 @@ export class Game {
     game.wares = new Map(d.wares.map(w => [w.id, w])); game.animals = d.animals;
     delete map.animals;
     game.netVersion = 1; game._route = new Map(); game.terrVersion = 1; game.objVersion = 1; game.roadVersion = 1;
-    game.events = []; game.projectiles = []; game.winner = d.winner ?? -1;
+    game.events = []; game.projectiles = (d.projectiles || []).filter(pr => pr.target); game.winner = d.winner ?? -1;
     game.players = d.players.map(pl => Object.assign(pl, { explored: Uint8Array.from(pl.explored), visible: new Uint8Array(m.w * m.h) }));
     game.missionState = d.mission;
-    game.updateVision(true);
+    game.updateVision(); // like a running game: only human players track vision
     return game;
   }
 }

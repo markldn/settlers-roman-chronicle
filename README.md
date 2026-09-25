@@ -21,6 +21,10 @@ A browser strategy game in the spirit of **The Settlers II Gold**, built with th
 
 ## Play
 
+**Online:** https://www.genhttp.dev/lambda/settlers-roman-chronicle/ opens on the multiplayer lobby. Single player and the campaign are one click away.
+
+### Locally, single player
+
 It's a static site with no build step. Serve the folder over HTTP (ES modules don't load from `file://`):
 
 ```bash
@@ -31,6 +35,37 @@ cd settlers-roman-chronicle
 ```
 
 Any static server works (`npx serve`, nginx, and so on). It needs a WebGL2 browser. Chrome, Edge and Firefox on a desktop GPU are recommended. If frames drop, set **Options → Graphics quality** to Medium or Low.
+
+### Locally, with multiplayer
+
+Multiplayer needs the small server in `server/` (C#, [GenHTTP](https://genhttp.org)). To run it on your machine you need Node 22 and the .NET 10 SDK:
+
+```bash
+npm install
+npm run build        # bundles the game into dist/ (one minified script)
+npm run dev-server   # hosts server/ + dist/ on http://localhost:8961/
+```
+
+### Publishing
+
+The hosted version is a lambda on [genhttp.dev](https://www.genhttp.dev/). `npm run deploy` builds the game and uploads the server code plus `dist/` as a new version. It reads the lambda's editor key from `$GENHTTP_KEY` or from the git-ignored file `.genhttp-key`. The key grants write access to the lambda, so never commit it.
+
+## Multiplayer
+
+The site opens on the multiplayer lobby, over a live game of two computer players. **Single player & campaign** at the bottom leads to the classic menu (campaign, unlimited play, saved games).
+
+- **An assistant guides you in.** It asks for your name the first time, then whether you want to join a game or host one. Hosting takes four short steps: world size, landscape and layout, computer opponents (how many, how well they play, allied or not), and a name for the game. Your choices are remembered for next time.
+- **The room.** It shows the players and their seats, a summary of the settings and a **Copy invite link** button. The link (`…/#join=<room>`) brings a friend straight into this room. Each player picks their nation and optionally a team (teammates cannot attack each other), and marks themselves ready. The host can open **Change settings** for everything else (mountains, forests, water, starting goods, seed) and starts the game. You can also start alone against the computer. Games still gathering players are listed in the lobby, with a lobby chat beside them.
+- **In the game.** Press `Enter` to chat with the other players. The panel at the top left lists the realms. Only the host sets the speed or pauses (`+` `-` `P`). The game menu does not pause a multiplayer game. You can save a copy, which loads as a single-player game.
+- **Dropping out.** If your connection breaks, the page reconnects by itself and catches up. If you reload or come back to the site within a few minutes, you are put back in your seat without any clicks. While a player is away for more than 20 seconds, a computer steward runs their realm until they return. A player who leaves the game for good is replaced by the computer. If the server forgets the game (it restarted), you can keep playing alone and the computer takes over the other realms.
+
+### How it works
+
+The server never runs the simulation. It is a **turn clock**: every 100 ms it closes a turn, which holds the commands players sent since the last turn plus how many simulation ticks the turn lasts (2 at normal speed, 0 while paused). It sends the turn to every player. Each browser runs the same deterministic simulation (seeded RNG, fixed 20 Hz ticks, integer grid), applies the same commands at the start of the same turn and so computes the same game (**lockstep**). A command travels as plain JSON such as `{k: 'build', n: 1234, t: 'sawmill'}`. Every client validates it in `src/sim/commands.js`, so a player can only change their own realm.
+
+- Every 20 turns each browser sends a fingerprint of its state. If one differs from the host's, the host uploads a snapshot, everybody loads it, and they replay the turns since then.
+- The host uploads a snapshot every 30 seconds anyway, gzipped and usually under 100 KB. A player who rejoins loads the latest snapshot and replays at most 30 seconds of turns.
+- Single player uses the same command path, applied at once. The UI does not know which mode it runs in.
 
 ## What's in it
 
@@ -82,6 +117,7 @@ All sound is synthesized with the Web Audio API. Sound effects are rendered once
 | `I` `T` `E` `B` `N` | Inventory, statistics, economy settings, buildings, messages |
 | `+` `-` · `P` | Game speed · pause |
 | `F5` / `F9` | Quick save / quick load |
+| `Enter` | Multiplayer: chat with the other players |
 | `Esc` | Cancel road · close windows · game menu |
 
 After you place a building you are in **road mode** straight away. Click nodes to lay the road and finish on a flag. Click the last node again to end with a new flag.
@@ -100,8 +136,13 @@ src/sim/        pure-JS simulation (no DOM): runs in the browser and headless in
   missions.js   campaign chapters and objectives
   game.js       state, commands, fixed 20 Hz update, save/load
 src/render/     three.js: terrain bake + water, models, instanced world sync, icons, post
+  commands.js   every player command (validated) + the state fingerprint used by multiplayer
+src/net/        multiplayer client: websocket with reconnect (net.js), lockstep turn runner (lockstep.js)
 src/ui/ui.js    windows, build menu, road building, minimap, input
+src/ui/lobby.js front page: multiplayer lobby + host assistant, game room, in-game chat and player list
 src/audio.js    synthesized SFX, ambience and music
+server/         the multiplayer server (C#, a genhttp.dev lambda): lobby, rooms, chat, turn clock, snapshots
+tools/          build (esbuild bundle), local dev server, deploy
 vendor/three/   three.js r185 (MIT), vendored so the game works offline
 tests/          headless soak test + Playwright browser probes
 ```
@@ -112,6 +153,8 @@ tests/          headless soak test + Playwright browser probes
 node tests/sim.test.mjs 30 5   # 2 hard AIs for 30 game-minutes: invariants, economy, combat, save/load
 ./run.sh & node tests/play.mjs # browser: builds through the real UI, runs time, opens windows, save/load
 node tests/shots.mjs           # regenerates the README screenshots
+node tests/mp.test.mjs         # lockstep: 3 clients + same commands stay identical; snapshots; command validation
+URL=http://localhost:8961/ node tests/mp-browser.mjs   # two browsers: lobby, chat, room, game, rejoin (needs the dev server)
 ```
 
 The headless sim runs about 400× realtime. The browser probes need Playwright and a GPU. They launch Chromium with `--use-angle=vulkan`.
