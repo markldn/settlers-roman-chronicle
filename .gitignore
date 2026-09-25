@@ -2,3 +2,6 @@ node_modules/
 __pycache__/
 *.log
 .DS_Store
+.genhttp-key
+.dev-server/
+dist/

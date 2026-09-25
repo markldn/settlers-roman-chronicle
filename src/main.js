@@ -6,6 +6,10 @@ import { Renderer } from './render/renderer.js';
 import { Audio } from './audio.js';
 import { UI, fmtTime, esc } from './ui/ui.js';
 import { getIconAtlas } from './render/icons.js';
+import { applyCommand } from './sim/commands.js';
+import { Net } from './net/net.js';
+import { Lockstep } from './net/lockstep.js';
+import { Lobby } from './ui/lobby.js';
 
 const $ = (s) => document.querySelector(s);
 const SPEEDS = [0.5, 1, 2, 4, 8];
@@ -13,6 +17,17 @@ const SPEEDS = [0.5, 1, 2, 4, 8];
 const app = window.app = {
   state: 'boot', game: null, me: 0, speed: 1, speedIdx: 1, paused: false, acc: 0,
   portraits: {},
+  mp: null, // the Lockstep of a running multiplayer game
+};
+
+// Every change a player makes to the game goes through here. Single player: applied at once.
+// Multiplayer: sent to the server and applied by every browser in the same turn; done(result)
+// runs when it happened here too.
+app.cmd = (c, done) => {
+  if (app.mp) { if (!app.mp.send(c, done)) app.ui.toast('Not connected to the server', 'warn', -1, 2500); return; }
+  const r = applyCommand(app.game, app.me, c);
+  if (done) done(r);
+  return r;
 };
 
 function setLoad(p, text) { $('#load-bar').style.width = Math.round(p * 100) + '%'; if (text) $('#load-text').textContent = text; }
@@ -26,13 +41,16 @@ async function boot() {
   app.audio = new Audio();
   app.ui = new UI(app);
   app.ui.bindInput($('#view'));
+  app.net = new Net();
+  app.lobby = new Lobby(app);
+  bindMultiplayer();
   setLoad(0.3, 'Carving the buildings…'); await frame();
   app.portraits = app.renderer.portraits('romans');
   setLoad(0.55, 'Shaping the land…'); await frame();
   await startDemo();
   setLoad(1, 'Ready'); await frame();
   $('#loading').classList.add('hidden');
-  showTitle();
+  showHome();
   document.addEventListener('pointerdown', () => app.audio.init(), { once: true });
   document.addEventListener('keydown', () => app.audio.init(), { once: true });
   requestAnimationFrame(loop);
@@ -50,14 +68,25 @@ async function startDemo() {
   app.demoT = 0;
 }
 
+// the front door: the multiplayer lobby over the running demo
+function showHome() {
+  app.state = 'title';
+  $('#title').classList.add('hidden'); $('#hud').classList.add('hidden');
+  app.lobby.open();
+}
+app.showHome = showHome;
+
+// the single player menu
 function showTitle() {
   app.state = 'title';
+  app.lobby.close();
   $('#title').classList.remove('hidden'); $('#hud').classList.add('hidden');
   document.querySelectorAll('#title [data-act]').forEach(b => b.onclick = () => { app.audio.init(); app.audio.ui('click'); titleAction(b.dataset.act); });
 }
 function titleAction(a) {
   if (a === 'campaign') campaignDialog();
   else if (a === 'free') freeDialog();
+  else if (a === 'multi') showHome();
   else if (a === 'load') loadDialog();
   else if (a === 'settings') optionsDialog();
   else if (a === 'help') helpDialog();
@@ -161,9 +190,11 @@ function loadDialog(inGame = false) {
 }
 
 app.quickSave = () => saveGame('Quick save');
-app.quickLoad = () => loadGame('Quick save');
+app.quickLoad = () => { if (app.mp) { app.ui.toast('Loading is not possible in a multiplayer game', 'warn', -1, 2500); return; } loadGame('Quick save'); };
+app.showTitle = showTitle;
 
 app.gameMenu = () => {
+  if (app.mp) { mpGameMenu(); return; }
   const wasPaused = app.paused; app.paused = true;
   modal('Game Menu', `<div style="display:flex;flex-direction:column;gap:8px;align-items:stretch;max-width:320px;margin:0 auto">
     <button class="btn" id="gm-save">Save game</button><button class="btn" id="gm-load">Load game</button><button class="btn" id="gm-opt">Options</button><button class="btn" id="gm-help">How to play</button>
@@ -196,23 +227,133 @@ async function startGame(setup) {
 }
 function enterGame(g) {
   app.ui.closeAll(); app.ui.cancelRoad && app.ui.road && app.ui.cancelRoad();
-  app.game = g; app.me = g.players.findIndex(p => p.human); if (app.me < 0) app.me = 0;
+  app.game = g; app.me = app.mp ? app.mp.slot : g.players.findIndex(p => p.human); if (app.me < 0) app.me = 0;
   app.renderer.setGame(g, app.me);
   app.renderer.world.revealAll = false;
   app.renderer.cam.tdist = 14;
   app.state = 'game'; app.paused = false; app.acc = 0; app.ended = false;
   app.ui.readMsgs = g.players[app.me].messages.length;
   $('#title').classList.add('hidden'); $('#hud').classList.remove('hidden');
-  app.setSpeed(1);
+  app.setSpeed(app.mp ? app.mp.speed : 1);
+  app.lobby.showGameChat(!!app.mp);
   app.ui.updateHud();
 }
-function quitToTitle() {
+// back to where the player came from: the lobby after a multiplayer game, the menu after single player
+function quitToTitle(home = !!app.mp) {
+  if (app.mp) leaveMultiplayer();
   app.ui.closeAll(); $('#hud').classList.add('hidden');
-  startDemo().then(showTitle);
+  startDemo().then(home ? showHome : showTitle);
 }
-app.setSpeed = (i) => { app.speedIdx = i; app.speed = SPEEDS[i]; $('#speed').textContent = (app.paused ? '❚❚ ' : '') + app.speed + '×'; };
-app.cycleSpeed = (d = 1) => { let i = app.speedIdx + d; if (i >= SPEEDS.length) i = 0; if (i < 0) i = 0; app.setSpeed(i); };
-app.togglePause = () => { app.paused = !app.paused; app.setSpeed(app.speedIdx); };
+app.setSpeed = (i) => {
+  app.speedIdx = i; app.speed = SPEEDS[i];
+  if (app.mp) app.paused = app.mp.paused;
+  $('#speed').textContent = (app.paused ? '❚❚ ' : '') + app.speed + '×';
+};
+app.cycleSpeed = (d = 1) => {
+  let i = app.speedIdx + d; if (i >= SPEEDS.length) i = 0; if (i < 0) i = 0;
+  if (app.mp) { if (mpHostOnly()) app.net.send('speed', { speed: i }); return; }
+  app.setSpeed(i);
+};
+app.togglePause = () => {
+  if (app.mp) { if (mpHostOnly()) app.net.send('speed', { paused: !app.mp.paused }); return; }
+  app.paused = !app.paused; app.setSpeed(app.speedIdx);
+};
+
+// ------------------------------------------------------------------ multiplayer
+function mpHostOnly() {
+  if (app.lobby.isHost()) return true;
+  app.ui.toast('Only the host sets the game speed', 'info', -1, 2500);
+  return false;
+}
+
+function bindMultiplayer() {
+  const net = app.net;
+  net.resumeTurn = () => (app.mp ? app.mp.recv : null);
+  net.on('start', (m) => startMultiplayer(m).catch((e) => { console.error(e); app.ui.toast('Could not start the game: ' + e.message, 'war'); }));
+  net.on('turn', (m) => app.mp && app.mp.onTurn(m));
+  net.on('turns', (m) => app.mp && app.mp.onTurns(m.turns));
+  net.on('speed', (m) => { if (!app.mp) return; app.mp.onSpeed(m); app.setSpeed(m.speed); });
+  net.on('snapreq', () => app.mp && app.mp.onSnapRequest());
+  net.on('snap', (m) => app.mp && app.mp.onSnap(m));
+  net.on('room', () => { if (app.mp && app.state === 'game') app.setSpeed(app.mp.speed); });
+  net.on('status', (s) => {
+    if (!app.mp || app.state !== 'game') return;
+    if (s === 'offline') app.ui.toast('Connection to the server lost — reconnecting…', 'war', -1, 4000);
+    else if (s === 'online') app.ui.toast('Reconnected', 'goal', -1, 2000);
+  });
+}
+
+async function startMultiplayer(m) {
+  // a page that reconnected keeps playing its game until the snapshot the server sends is loaded
+  if (app.mp && app.mp.room === m.room) { app.mp.onSpeed(m); return; }
+  app.lobby.close(); closeModal();
+  $('#title').classList.add('hidden');
+  const ls = new Lockstep(app.net, m, {
+    onGame: (g, reason) => {
+      if (app.state === 'game' && app.game && app.mp === ls) swapGame(g);
+      else { enterGame(g); $('#loading').classList.add('hidden'); }
+      if (reason === 'desync') app.ui.toast('Resynchronised with the other players', 'hint', -1, 3000);
+    },
+    onSystem: () => app.lobby.renderRoster(),
+    onError: (text) => { app.ui.toast(text, 'war', -1, 8000); },
+  });
+  app.mp = ls;
+  $('#loading').classList.remove('hidden');
+  if (m.resume) { setLoad(0.5, 'Rejoining the game…'); return; }
+  setLoad(0.2, 'Surveying the land…'); await frame();
+  const g = ls.begin();
+  setLoad(0.6, 'Baking the terrain…'); await frame();
+  enterGame(g);
+  $('#loading').classList.add('hidden');
+  app.ui.toast('The game has begun. Press Enter to chat with the other players.', 'hint', -1, 7000);
+}
+
+// load a snapshot into the running view, keeping the camera where it is
+function swapGame(g) {
+  const R = app.renderer, cam = Object.assign({}, R.cam);
+  app.ui.closeAll(); if (app.ui.road) app.ui.cancelRoad();
+  app.game = g;
+  R.setGame(g, app.me);
+  Object.assign(R.cam, cam);
+  if (!g.players[app.me].alive) R.world.revealAll = true;
+  app.ui.updateHud(); app.lobby.renderRoster();
+}
+
+function leaveMultiplayer() {
+  if (!app.mp) return;
+  app.mp = null;
+  app.net.send('leave');
+  app.lobby.showGameChat(false);
+  app.lobby.room = null;
+}
+
+// the server lost our game (restart, room closed): keep playing alone if the player likes
+app.mpLost = (why) => {
+  const ls = app.mp; if (!ls) return;
+  ls.offlineOffered = true;
+  modal('Connection lost', `<div class="bigmsg"><p>${esc(why)}</p><p class="muted">You can keep playing this game on your own: the computer takes over the other players' realms.</p></div>`,
+    [{ text: 'Back to the lobby', fn: () => { app.mp = null; app.lobby.showGameChat(false); app.lobby.room = null; quitToTitle(true); } },
+     { text: 'Continue alone', cls: 'green', fn: () => {
+       app.mp = null; app.lobby.showGameChat(false); app.lobby.room = null;
+       for (const p of app.game.players) if (p.id !== app.me && p.human && !p.ai) p.ai = 'normal';
+       app.setSpeed(1); app.paused = false; app.acc = 0;
+     } }]);
+};
+
+function mpGameMenu() {
+  modal('Game Menu', `<div style="display:flex;flex-direction:column;gap:8px;align-items:stretch;max-width:320px;margin:0 auto">
+    <p class="muted" style="text-align:center;margin:0 0 6px">The game keeps running while this menu is open.</p>
+    <button class="btn" id="gm-save">Save a copy</button><button class="btn" id="gm-opt">Options</button><button class="btn" id="gm-help">How to play</button>
+    <button class="btn red" id="gm-quit">Leave the game</button></div>`,
+  [{ text: 'Resume', cls: 'green' }], {
+    onMount: (m) => {
+      m.querySelector('#gm-save').onclick = () => { const n = prompt('Save name (loads as a single player game)', 'Multiplayer game'); if (n) saveGame(n); closeModal(); };
+      m.querySelector('#gm-opt').onclick = () => optionsDialog(true);
+      m.querySelector('#gm-help').onclick = () => helpDialog();
+      m.querySelector('#gm-quit').onclick = () => { if (confirm('Leave this game? A computer steward will run your realm.')) { closeModal(); quitToTitle(); } };
+    },
+  });
+}
 
 function endGame(won) {
   if (app.ended) return; app.ended = true;
@@ -223,6 +364,12 @@ function endGame(won) {
   const pl = g.players[app.me];
   const body = `<div class="bigmsg"><h1>${won ? 'Victory!' : 'Defeat'}</h1><p>${won ? (ch ? `${esc(ch.title)} is complete.` : 'All your enemies have been defeated.') : 'Your realm has fallen.'}</p>
     <p class="muted">Time ${fmtTime(g.time)} · land ${pl.territory} · enemies slain ${pl.killed} · boards sawn ${pl.produced.boards || 0}</p></div>`;
+  if (app.mp) {
+    if (!won) app.renderer.world.revealAll = true;
+    modal(won ? 'Victory' : 'Defeat', body.replace('Your realm has fallen.', 'Your realm has fallen. You can stay and watch the others.'),
+      [{ text: 'Leave the game', fn: quitToTitle }, { text: won ? 'Keep playing' : 'Watch', cls: 'green' }]);
+    return;
+  }
   const btns = [{ text: 'Keep playing', fn: () => {} }, { text: 'Title screen', fn: quitToTitle }];
   if (won && next) btns.push({ text: 'Next chapter', cls: 'green', fn: () => startGame(makeSetup(next)) });
   if (!won) btns.push({ text: 'Try again', cls: 'green', fn: () => startGame(g.setup) });
@@ -248,7 +395,8 @@ function loop(now) {
     return;
   }
   if (app.state !== 'game') return;
-  if (!app.paused && $('#modal').classList.contains('hidden')) {
+  if (app.mp) app.mp.advance();
+  else if (!app.paused && $('#modal').classList.contains('hidden')) {
     app.acc += dt * app.speed;
     let steps = 0;
     while (app.acc >= TICK && steps++ < 40) { g.update(TICK); app.acc -= TICK; }
@@ -269,6 +417,7 @@ function loop(now) {
   if (slowT > 1) {
     slowT = 0;
     app.audio.updateAmbience(1, viewMix(g, R));
+    if (app.mp) app.lobby.renderRoster();
     const r = checkMission(g, app.me);
     if (r.hint) app.ui.toast(r.hint, 'hint', -1, 14000);
     if (r.won) endGame(true); else if (r.lost || !g.players[app.me].alive) endGame(false);
@@ -285,5 +434,12 @@ function viewMix(g, R) {
   n = Math.max(1, n);
   return { grass: grass / n, water: water / n, mountain: mt / n, winter: g.map.theme === 'winter' };
 }
+
+// a hidden tab gets no animation frames; keep a multiplayer game ticking so it does not fall behind
+setInterval(() => {
+  if (!document.hidden || !app.mp || app.state !== 'game') return;
+  app.mp.advance(100);
+  app.game.events.length = 0;
+}, 250);
 
 boot().catch((e) => { console.error(e); $('#load-text').textContent = 'Failed to start: ' + e.message; });

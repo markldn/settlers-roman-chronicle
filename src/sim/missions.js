@@ -128,6 +128,38 @@ export function freeSetup(o) {
   return { seed: o.seed, mapOpts: { w, h, seed: o.seed, players: players.length, theme: o.theme, water: o.water ?? 0.5, mountains: o.mountains ?? 0.5, forest: o.forest ?? 0.5, layout: o.layout || 'continent' }, players, mission: null };
 }
 
+// Multiplayer: the room's settings plus its seats (in slot order) become a setup that every client
+// builds identically. Humans take the first slots, computer players the rest; at most MAX_PLAYERS.
+export const MAX_PLAYERS = 6;
+export const MP_DEFAULTS = { size: 'medium', theme: 'greenland', layout: 'continent', mountains: 5, forest: 5, water: 5, ai: 0, aiLevel: 'normal', aiTeam: false, start: 'normal', seed: 0 };
+export function mpSetup(settings, seats, seed) {
+  const o = Object.assign({}, MP_DEFAULTS, settings);
+  const sizes = { small: [56, 56], medium: [80, 72], large: [112, 100], huge: [144, 128] };
+  const [w, h] = sizes[o.size] || sizes.medium;
+  const start = START_PRESETS[o.start] ? o.start : 'normal';
+  const ai = ['easy', 'normal', 'hard'].includes(o.aiLevel) ? o.aiLevel : 'normal';
+  const clamp01 = (v) => Math.max(0, Math.min(1, (+v || 0) / 10));
+  const players = seats.slice(0, MAX_PLAYERS).map((s, i) => {
+    const p = { name: String(s.name || `Player ${i + 1}`).slice(0, 20), human: true, nation: NATIONS_OK.includes(s.nation) ? s.nation : 'romans', start: START_PRESETS[start] };
+    if (s.team >= 1 && s.team <= 4) p.team = 100 + s.team;
+    return p;
+  });
+  const names = ['Brennus', 'Ambiorix', 'Sigrid', 'Taharqa', 'Yoritomo', 'Ragnar'];
+  const nations = ['vikings', 'nubians', 'japanese', 'romans', 'vikings', 'nubians'];
+  const aiN = Math.max(0, Math.min(MAX_PLAYERS - players.length, o.ai | 0));
+  for (let i = 0; i < aiN; i++) {
+    const p = { name: names[i], ai, nation: nations[i], start: START_PRESETS[start] };
+    if (o.aiTeam) p.team = 99;
+    players.push(p);
+  }
+  return {
+    seed, players, mission: null, mp: true,
+    mapOpts: { w, h, seed, players: players.length, theme: ['greenland', 'winter', 'wasteland'].includes(o.theme) ? o.theme : 'greenland',
+      water: clamp01(o.water), mountains: clamp01(o.mountains), forest: clamp01(o.forest), layout: ['continent', 'lakes', 'valley', 'islands', 'pass'].includes(o.layout) ? o.layout : 'continent' },
+  };
+}
+const NATIONS_OK = ['romans', 'vikings', 'nubians', 'japanese'];
+
 // ------------------------------------------------------------------ objectives
 export function initMission(game) {
   const ch = CAMPAIGN.find(c => c.id === game.setup.mission);
