@@ -1,5 +1,5 @@
 // Drives a real session in the browser: builds, lays roads, runs time, opens windows, save/load.
-const { chromium } = await import(process.env.PLAYWRIGHT || 'playwright').catch(() => import('/home/mark/scripts/tracker/node_modules/playwright/index.mjs'));
+const { chromium } = await import(process.env.PLAYWRIGHT || 'playwright');
 import fs from 'fs';
 const OUT = process.env.OUT || '/tmp/settlers-shots'; fs.mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu'] });

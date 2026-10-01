@@ -1,5 +1,5 @@
 // Browser probe: loads the game, captures errors, screenshots title + a started free game.
-const { chromium } = await import(process.env.PLAYWRIGHT || 'playwright').catch(() => import('/home/mark/scripts/tracker/node_modules/playwright/index.mjs'));
+const { chromium } = await import(process.env.PLAYWRIGHT || 'playwright');
 const URL = process.env.URL || 'http://localhost:8960/';
 const OUT = process.env.OUT || '/tmp/settlers-shots';
 import fs from 'fs'; fs.mkdirSync(OUT, { recursive: true });

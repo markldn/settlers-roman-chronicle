@@ -1,5 +1,5 @@
 // Regenerates docs/screenshots/*.png for the README (needs the server on :8960 and a GPU).
-const { chromium } = await import(process.env.PLAYWRIGHT || 'playwright').catch(() => import('/home/mark/scripts/tracker/node_modules/playwright/index.mjs'));
+const { chromium } = await import(process.env.PLAYWRIGHT || 'playwright');
 const OUT = new URL('../docs/screenshots/', import.meta.url).pathname;
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu'] });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
